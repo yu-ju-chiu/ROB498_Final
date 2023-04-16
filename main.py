@@ -7,6 +7,7 @@ from IPython.display import Image
 from tqdm.notebook import tqdm
 
 from cartpole_env import *
+from dynamics_analytic import *
 
 def main():
     env = CartpoleEnv()
