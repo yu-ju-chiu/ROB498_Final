@@ -114,25 +114,29 @@ class CartpoleEnv(BaseEnv):
         """
             Linearizes cartpole dynamics around linearization point (state, control). Uses numerical differentiation
         Args:
-            state: np.array of shape (4,) representing cartpole state
+            state: np.array of shape (6,) representing cartpole state
             control: np.array of shape (1,) representing the force to apply
             eps: Small change for computing numerical derivatives
         Returns:
-            A: np.array of shape (4, 4) representing Jacobian df/dx for dynamics f
-            B: np.array of shape (4, 1) representing Jacobian df/du for dynamics f
+            A: np.array of shape (6, 6) representing Jacobian df/dx for dynamics f
+            B: np.array of shape (6, 1) representing Jacobian df/du for dynamics f
         """
         A, B = None, None
         # --- Your code here
-        idx1 = np.array([1, 0, 0, 0])
-        idx2 = np.array([0, 1, 0, 0])
-        idx3 = np.array([0, 0, 1, 0])
-        idx4 = np.array([0, 0, 0, 1])
+        idx1 = np.array([1, 0, 0, 0, 0, 0])
+        idx2 = np.array([0, 1, 0, 0, 0, 0])
+        idx3 = np.array([0, 0, 1, 0, 0, 0])
+        idx4 = np.array([0, 0, 0, 1, 0, 0])
+        idx5 = np.array([0, 0, 0, 0, 1, 0])
+        idx6 = np.array([0, 0, 0, 0, 0, 1])
         A1 = (self.dynamics(state+eps*idx1, control)-self.dynamics(state-eps*idx1, control)) /2 /eps
         A2 = (self.dynamics(state+eps*idx2, control)-self.dynamics(state-eps*idx2, control)) /2 /eps
         A3 = (self.dynamics(state+eps*idx3, control)-self.dynamics(state-eps*idx3, control)) /2 /eps
         A4 = (self.dynamics(state+eps*idx4, control)-self.dynamics(state-eps*idx4, control)) /2 /eps
+        A5 = (self.dynamics(state+eps*idx5, control)-self.dynamics(state-eps*idx5, control)) /2 /eps
+        A6 = (self.dynamics(state+eps*idx6, control)-self.dynamics(state-eps*idx6, control)) /2 /eps
         B = (self.dynamics(state, control+eps)-self.dynamics(state, control-eps)) /2 /eps
-        A = np.vstack((A1, A2, A3, A4))
+        A = np.vstack((A1, A2, A3, A4, A5, A6))
         A = A.T
         B = B[:, None]
         # ---
