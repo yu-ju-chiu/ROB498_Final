@@ -1,3 +1,10 @@
+import torch
+import numpy as np
+import pybullet as p
+import pybullet_data as pd
+from base_env import BaseEnv
+import gym
+from torch.autograd.functional import jacobian
 def dynamics_analytic(state, action):
     """
         Computes x_t+1 = f(x_t, u_t) using analytic model of dynamics in Pytorch
@@ -11,12 +18,14 @@ def dynamics_analytic(state, action):
 
     """
     next_state = None
-    M = 1000
-    m1 = 100
-    m2 = 100
-    l1 = 1
-    l2 = 1
+    M = 1
+    m1 = 0.1
+    m2 = 0.1
+    l1 = 0.5
+    l2 = 0.5
     g = 9.8
+    next_state = None
+    dt = 0.05
 
     # state
     x, theta_1, theta_2, dx, dtheta_1, dtheta_2 = torch.chunk(state, 6, 1)
@@ -30,12 +39,13 @@ def dynamics_analytic(state, action):
     # tacc = (g * st - ct * (action + mp * l * dtheta ** 2 * st) / mt) / (l * ((4.0 / 3.0) - ((mp * ct ** 2) / mt)))
     # xacc = (action + mp * l * (dtheta ** 2 * st - tacc * ct)) / mt
     F = action
-    xacc =  F + m1 * l1 * dtheta_1**2 * st1 + m2 * l2 * dtheta_2**2 * st2 *- m2 * l1 * dtheta_1 ** 2 * torch.cos(theta_1-theta_2)\
-            * torch.sin(theta_1 - theta_2) - (m1 + m2) * g * st1 - m2 * l2 * dtheta_2**2 * torch.cos(theta_1 - theta_2) * torch.sin(theta_1 - theta_2)
-    t1acc = g * st1 + torch.cos(theta_1 - theta_2) * (((l1 * dtheta_1 * torch.sin(theta_1 - theta_2))\
-        - ( g * st2 + l2 * (dtheta_2)**2 * torch.sin(theta_1-theta_2)))
-    t2acc = g * st2 + l1 * dtheta_1**2 * torch.sin(theta_1 - theta_2) + torch.cos(theta_1 - theta_2) * ((m1 - m2) * g\
-        *st1 +l2 * (m2 * dtheta_2**2 * torch.sin(theta_1 - theta_2)))
+    xacc =  (F + m1 * l1 * dtheta_1**2 * st1 + m2 * l2 * dtheta_2**2 * st2 *- m2 * l1 * dtheta_1 ** 2 * torch.cos(theta_1-theta_2)\
+            * torch.sin(theta_1 - theta_2) - (m1 + m2) * g * st1 - m2 * l2 * dtheta_2**2 * torch.cos(theta_1 - theta_2)\
+                 * torch.sin(theta_1 - theta_2)) / M
+    t1acc = (g * st1 + torch.cos(theta_1 - theta_2) * ((l1 * dtheta_1 * torch.sin(theta_1 - theta_2))\
+        - ( g * st2 + l2 * (dtheta_2)**2 * torch.sin(theta_1-theta_2)))) / l1
+    t2acc = (g * st2 + l1 * dtheta_1**2 * torch.sin(theta_1 - theta_2) + torch.cos(theta_1 - theta_2) * ((m1 - m2) * g\
+        *st1 +l2 * (m2 * dtheta_2**2 * torch.sin(theta_1 - theta_2)))) / l2
     #### be careful the order
 
     # Update velocities.
@@ -73,21 +83,21 @@ def linearize_pytorch(state, control):
     A, B = A[0, :, 0, :,0, :], B[0, :, 0, :,0, :]
     # ---
     return A, B
-        Linearizes cartpole dynamics around linearization point (state, control). Uses autograd of analytic dynamics
-    Args:
-        state: torch.tensor of shape (4,) representing cartpole state
-        control: torch.tensor of shape (1,) representing the force to apply
+    #     Linearizes cartpole dynamics around linearization point (state, control). Uses autograd of analytic dynamics
+    # Args:
+    #     state: torch.tensor of shape (4,) representing cartpole state
+    #     control: torch.tensor of shape (1,) representing the force to apply
 
-    Returns:
-        A: torch.tensor of shape (4, 4) representing Jacobian df/dx for dynamics f
-        B: torch.tensor of shape (4, 1) representing Jacobian df/du for dynamics f
+    # Returns:
+    #     A: torch.tensor of shape (4, 4) representing Jacobian df/dx for dynamics f
+    #     B: torch.tensor of shape (4, 1) representing Jacobian df/du for dynamics f
 
-    """
-    A, B = None, None
-    # --- Your code here
-    state = torch.reshape(state, (1, 6))
-    control = torch.reshape(control, (1, 1))
-    A, B = jacobian(dynamics_analytic,(state,control))
-    A, B = A[0, :, 0, :,0, :], B[0, :, 0, :,0, :]
-    # ---
-    return A, B
+    # """
+    # A, B = None, None
+    # # --- Your code here
+    # state = torch.reshape(state, (1, 6))
+    # control = torch.reshape(control, (1, 1))
+    # A, B = jacobian(dynamics_analytic,(state,control))
+    # A, B = A[0, :, 0, :,0, :], B[0, :, 0, :,0, :]
+    # # ---
+    # return A, B
