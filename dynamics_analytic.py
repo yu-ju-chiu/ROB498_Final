@@ -5,66 +5,56 @@ import pybullet_data as pd
 from base_env import BaseEnv
 import gym
 from torch.autograd.functional import jacobian
+
 def dynamics_analytic(state, action):
     """
-        Computes x_t+1 = f(x_t, u_t) using analytic model of dynamics in Pytorch
-        Should support batching
+    Function to define the system of ordinary differential equations (ODEs) for the double pendulum on a cart.
+    
     Args:
-        state: torch.tensor of shape (B, 4) representing the cartpole state
-        control: torch.tensor of shape (B, 1) representing the force to apply
-
+        t (float): Current time.
+        y (array): Array containing the current values of the state variables [x, dx/dt, theta1, d(theta1)/dt, theta2, d(theta2)/dt].
+        m1 (float): Mass of pendulum 1.
+        m2 (float): Mass of pendulum 2.
+        l1 (float): Length of pendulum 1.
+        l2 (float): Length of pendulum 2.
+        g (float): Acceleration due to gravity.
+    
     Returns:
-        next_state: torch.tensor of shape (B, 4) representing the next cartpole state
-
+        dydt (array): Array containing the derivatives of the state variables [dx/dt, d^2x/dt^2, d(theta1)/dt, d^2(theta1)/dt^2, d(theta2)/dt, d^2(theta2)/dt^2].
     """
     next_state = None
     M = 1
     m1 = 0.1
     m2 = 0.1
-    l1 = 0.5
-    l2 = 0.5
+    L1 = 0.5
+    L2 = 0.5
     g = 9.8
-    next_state = None
     dt = 0.05
+    # x, dxdt, theta1, dtheta1dt, theta2, dtheta2dt = y
+    x, theta1, theta2, dx, dtheta1, dtheta2 = torch.chunk(state, 6, 1)
 
-    # state
-    x, theta_1, theta_2, dx, dtheta_1, dtheta_2 = torch.chunk(state, 6, 1)
-    # print(x, theta, dx, dtheta)
-    st1 = torch.sin(theta_1)
-    ct2 = torch.cos(theta_1)
-    st2 = torch.sin(theta_2)
-    ct2 = torch.cos(theta_2)
+    Mt = torch.tensor([[ M+m1+m2,                  L1*(m1+m2)*torch.cos(theta1),     m2*L2*torch.cos(theta2)],\
+          [L1*(m1+m2)*torch.cos(theta1),     L1**2*(m1+m2),             L1*L2*m2*torch.cos(theta1-theta2)],\
+          [L2*m2*torch.cos(theta2),          L1*L2*m2*torch.cos(theta1-theta2),  L2**2*m2        ]], dtype=torch.float64)
 
-    # Compute accelerations
-    # tacc = (g * st - ct * (action + mp * l * dtheta ** 2 * st) / mt) / (l * ((4.0 / 3.0) - ((mp * ct ** 2) / mt)))
-    # xacc = (action + mp * l * (dtheta ** 2 * st - tacc * ct)) / mt
-    F = action
-    xacc =  (F + m1 * l1 * dtheta_1**2 * st1 + m2 * l2 * dtheta_2**2 * st2 *- m2 * l1 * dtheta_1 ** 2 * torch.cos(theta_1-theta_2)\
-            * torch.sin(theta_1 - theta_2) - (m1 + m2) * g * st1 - m2 * l2 * dtheta_2**2 * torch.cos(theta_1 - theta_2)\
-                 * torch.sin(theta_1 - theta_2)) / M
-    t1acc = (g * st1 + torch.cos(theta_1 - theta_2) * ((l1 * dtheta_1 * torch.sin(theta_1 - theta_2))\
-        - ( g * st2 + l2 * (dtheta_2)**2 * torch.sin(theta_1-theta_2)))) / l1
-    t2acc = (g * st2 + l1 * dtheta_1**2 * torch.sin(theta_1 - theta_2) + torch.cos(theta_1 - theta_2) * ((m1 - m2) * g\
-        *st1 +l2 * (m2 * dtheta_2**2 * torch.sin(theta_1 - theta_2)))) / l2
-    #### be careful the order
+    f1 = L1*(m1+m2)*dtheta1**2*torch.sin(theta1) + m2*L2*theta2**2*torch.sin(theta2) + action 
+    f2 = -L1*L2*m2*dtheta2**2*torch.sin(theta1-theta2) + g*(m1+m2)*L1*torch.sin(theta1)
+    f3 =  L1*L2*m2*dtheta1**2*torch.sin(theta1-theta2) + g*L2*m2*torch.sin(theta2)
 
+    xacc, t1acc, t2acc = torch.linalg.inv(Mt) @ torch.tensor([[f1],[f2],[f3]], dtype=torch.float64) 
     # Update velocities.
     dx = dx + xacc * dt
-    dtheta_1 = dtheta_1 + t1acc * dt
-    dtheta_2 = dtheta_2 + t2acc * dt
+    dtheta1 = dtheta1 + t1acc * dt
+    dtheta2 = dtheta2 + t2acc * dt
 
     # Update position/angle.
     x = x + dt * dx
-    theta_1= theta_1 + dt * dtheta_1
-    theta_2 = theta_2 + dt * dtheta_2
-
-
-
-    next_state = torch.cat([x, theta_1, theta_2, dx, dtheta_1, dtheta_2], dim = 1)
-    # ---
-
+    theta1= theta1 + dt * dtheta1
+    theta2 = theta2 + dt * dtheta2                 
+    next_state = torch.cat([x, theta1, theta2, dx, dtheta1, dtheta2], dim = 1)
+    # dydt = [dxdt, ddxdtdt, dtheta1dt, ddtheta1dtdt, dtheta2dt, ddtheta2dtdt]
+    
     return next_state
-
 
 def linearize_pytorch(state, control):
     """f shape (4,) representing cartpole state
@@ -83,21 +73,3 @@ def linearize_pytorch(state, control):
     A, B = A[0, :, 0, :,0, :], B[0, :, 0, :,0, :]
     # ---
     return A, B
-    #     Linearizes cartpole dynamics around linearization point (state, control). Uses autograd of analytic dynamics
-    # Args:
-    #     state: torch.tensor of shape (4,) representing cartpole state
-    #     control: torch.tensor of shape (1,) representing the force to apply
-
-    # Returns:
-    #     A: torch.tensor of shape (4, 4) representing Jacobian df/dx for dynamics f
-    #     B: torch.tensor of shape (4, 1) representing Jacobian df/du for dynamics f
-
-    # """
-    # A, B = None, None
-    # # --- Your code here
-    # state = torch.reshape(state, (1, 6))
-    # control = torch.reshape(control, (1, 1))
-    # A, B = jacobian(dynamics_analytic,(state,control))
-    # A, B = A[0, :, 0, :,0, :], B[0, :, 0, :,0, :]
-    # # ---
-    # return A, B
