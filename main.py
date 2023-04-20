@@ -4,10 +4,12 @@ from torch.utils.data import Dataset, DataLoader
 import matplotlib.pyplot as plt
 from numpngw import write_apng
 from IPython.display import Image
-from tqdm.notebook import tqdm
+from tqdm import tqdm
 
 from cartpole_env import *
-from dynamics_analytic import *
+from dynamics import *
+from mppi_control import *
+from ddp_control import *
 
 def main():
     env = CartpoleEnv()
@@ -24,14 +26,41 @@ def main():
     # write_apng("cartpole_example.png", frames, delay=10)
     # Image(filename="cartpole_example.png")
 
+    # Linearization around 
+    env = CartpoleEnv()
+    # B = 4
+    # states = 0.1 * torch.randn(B, 6)
+    # actions = torch.randn(B, 1)
+
+    # # first lets see what the pybullet dynamics are
+    # print('Next states from simulator are: ')
+    # for state, action in zip(states, actions):
+    #     print(env.dynamics(state.numpy(), action.numpy()))
+
+    # print('')
+    # print('Batched next states from analytical dynamics are')
+    # print(dynamics_analytic(states, actions))
 
 
-    ## Let's test to see if your analytic dynamics matches the simulator
+    A_numerical, B_numerical = env.linearize_numerical(np.zeros(6), np.zeros(1))
+
+    print('Numerical Linearizations are ')
+    print(A_numerical)
+    print(B_numerical)
+    print('')
+    A_autograd, B_autograd = linearize_pytorch(torch.zeros(6), torch.zeros(1))
+
+    print('Autograd linearizations are ')
+    print(A_autograd)
+    print(B_autograd)
+
+
+    # Let's test to see if your analytic dynamics matches the simulator
 
     # first let's generate a random control sequence
     T = 50
     control_sequence = np.random.randn(T, 1)
-    start_state = np.array([1, 0.25, 0, 0, 0, 0])
+    start_state = np.array([0.0, 0.5, 0.5, 0.0, 0.0, 0.0])
 
     # We use the simulator to simulate a trajectory
     env = CartpoleEnv()
@@ -80,6 +109,56 @@ def main():
 
     axes[0][0].legend()
     plt.show()
+
+    # MPPI
+    env = CartpoleEnv()
+    env.reset(np.array([0, np.pi, 0, 0, 0, 0]) + np.random.rand(6,)) 
+    goal_state = np.zeros(6)
+    controller = MPPIController(env, num_samples=500, horizon=30, hyperparams=get_cartpole_mppi_hyperparams())
+    controller.goal_state = torch.tensor(goal_state, dtype=torch.float32)
+    frames = []
+    num_steps = 70
+    pbar = tqdm(range(num_steps))
+    for i in pbar:
+        state = env.get_state()
+        state = torch.tensor(state, dtype=torch.float32)
+        control = controller.command(state)
+        s = env.step(control) 
+        error_i = np.linalg.norm(s-goal_state[:7])
+        pbar.set_description(f'Goal Error: {error_i:.4f}')
+        img = env.render()
+        frames.append(img)
+        if error_i < .1:
+            break
+    print("creating animated gif, please wait about 10 seconds")
+    write_apng("cartpole_mppi.gif", frames, delay=10)
+    Image(filename="cartpole_mppi.gif")
+
+    # DDP
+    # Define problem parameters
+    env = CartpoleEnv()
+    env.reset(np.array([0, np.pi, 0, 0, 0, 0]) + np.random.rand(6,)) 
+    goal_state = np.zeros(6)
+    controller = DDPController(env, horizon=30)
+    controller.goal_state = torch.tensor(goal_state, dtype=torch.float32)
+    frames = []
+    num_steps = 70
+    pbar = tqdm(range(num_steps))
+    for i in pbar:
+        state = env.get_state()
+        state = torch.tensor(state, dtype=torch.float32)
+        control = controller.command(state)
+        s = env.step(control) 
+        error_i = np.linalg.norm(s-goal_state[:7])
+        pbar.set_description(f'Goal Error: {error_i:.4f}')
+        img = env.render()
+        frames.append(img)
+        if error_i < .1:
+            break
+    
+    print("creating animated gif, please wait about 10 seconds")
+    write_apng("cartpole_ddp.gif", frames, delay=10)
+    Image(filename="cartpole_ddp.gif")
 
 
 if __name__ == '__main__':

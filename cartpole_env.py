@@ -92,10 +92,10 @@ class CartpoleEnv(BaseEnv):
         return state_space
 
     def _setup_camera(self):
-        self.render_h = 240
-        self.render_w = 320
+        self.render_h = 480
+        self.render_w = 640
         base_pos = [0, 0, 0]
-        cam_dist = 2
+        cam_dist = 4
         cam_pitch = 0.3
         cam_yaw = 0
         self.view_matrix = p.computeViewMatrixFromYawPitchRoll(

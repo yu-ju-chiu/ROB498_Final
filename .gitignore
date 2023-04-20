@@ -1,2 +1,4 @@
 *.png
+test.py
+install.py
 /__pycache__

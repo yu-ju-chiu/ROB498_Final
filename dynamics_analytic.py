@@ -67,9 +67,11 @@ def linearize_pytorch(state, control):
     """
     A, B = None, None
     # --- Your code here
-    state = torch.reshape(state, (1, 6))
-    control = torch.reshape(control, (1, 1))
-    A, B = jacobian(dynamics_analytic,(state,control))
-    A, B = A[0, :, 0, :,0, :], B[0, :, 0, :,0, :]
+    state_B = state[None, :]
+    control_B = control[None, :]
+    J = torch.autograd.functional.jacobian(dynamics_analytic, (state_B, control_B))
+    A = torch.squeeze(J[0])
+    B = torch.squeeze(J[1])
+    B = B[:, None]
     # ---
     return A, B
