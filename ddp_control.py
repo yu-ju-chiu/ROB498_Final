@@ -13,6 +13,7 @@ class DDPController(object):
         self.state_size = env.state_space.shape[-1]
         self.goal_state = torch.zeros(self.state_size)  # This is just a container for later use
         self.Q = torch.diag(torch.tensor([5.0, 5.0, 5.0, 0.1, 0.1, 0.1]))
+        self.R = torch.diag(torch.tensor([0.1]))
         self.U = torch.zeros((self.T, self.action_size)) # nominal action sequence (T, action_size)
         self.u_init = torch.zeros(self.action_size)
         self.X = torch.zeros((self.T, self.state_size))
@@ -98,11 +99,11 @@ class DDPController(object):
             self.U[i] += eps*self.k[i] + self.K[i] @ dx[i]
             x[i+1] = self._dynamics(x[i], self.U[i])
 
-    def _compute_trajectory_cost(self, trajectory):
+    def _compute_cost(self, states, actions):
         """
         Compute the costs for the K different trajectories
-        :param trajectory: torch tensor of shape (T, state_size)
-        :param perturbations: torch tensor of shape (T, action_size)
+        :param state: torch tensor of shape (state_size)
+        :param action: torch tensor of shape (action_size)
         :return:
          - total_trajectory_cost: torch tensor of shape (1,) containing the total trajectory costs for the K trajectories
         Observations:
@@ -110,13 +111,53 @@ class DDPController(object):
         * State cost should be quadratic as (state_i-goal_state)^T Q (state_i-goal_state)
         * Action costs "TODO"
         """
-        total_trajectory_cost = None
-        # --- Your code here
-        dist2goal = trajectory[:,None,:]-self.goal_state.reshape(1,1,-1)
-        total_trajectory_cost = torch.matmul(torch.matmul(dist2goal, self.Q), dist2goal.permute(0,2,1)).squeeze()
-        total_trajectory_cost = torch.sum(total_trajectory_cost, dim=1)
+        
+        total_cost = None
+        # Define the state cost weight matrix Q
+        Q = self.Q
+
+        # Define the control cost weight matrix R
+        R = self.R
+        # Compute the state costs
+        actions = actions[:, None]
+        states = states[:, None]
+
+
+        state_errors = states - self.goal_state
+        state_costs = state_errors.T @ Q @ state_errors
+        control_costs = actions.T @ R @ actions
+        total_cost = state_costs + control_costs
         # ---
-        return total_trajectory_cost
+        return total_cost
+
+
+    def _compute_trajectory_cost(self, trajectory_states, trajectory_acrions):
+        """
+        Compute the costs for the K different trajectories
+        :param state: torch tensor of shape (T, state_size)
+        :param action: torch tensor of shape (T, action_size)
+        :return:
+         - total_trajectory_cost: torch tensor of shape (1,) containing the total trajectory costs for the K trajectories
+        Observations:
+        * The trajectory cost be the sum of the state costs and action costs along the trajectories
+        * State cost should be quadratic as (state_i-goal_state)^T Q (state_i-goal_state)
+        * Action costs "TODO"
+        """
+        # Define the state cost weight matrix Q
+        Q = self.Q
+
+        # Define the control cost weight matrix R
+        R = self.R
+
+        # Compute the state costs
+        state_errors = trajectory_states - self.goal_state.repeat(self.T, 1)
+        state_costs = torch.sum(state_errors.T @ Q @ state_errors, axis=1)
+        control_costs = torch.sum(trajectory_acrions.T @ R @ trajectory_acrions, axis=1)
+
+        # Compute the total cost
+        total_cost = state_costs + control_costs
+
+        return total_cost
 
     def _dynamics(self, state, action):
         """
