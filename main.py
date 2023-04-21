@@ -139,10 +139,10 @@ def main():
     env = CartpoleEnv()
     env.reset(np.array([0, np.pi, 0, 0, 0, 0]) + np.random.rand(6,)) 
     goal_state = np.zeros(6)
-    controller = DDPController(env, horizon=30)
+    controller = DDPController(env, horizon=10)
     controller.goal_state = torch.tensor(goal_state, dtype=torch.float32)
     frames = []
-    num_steps = 2
+    num_steps = 100
     pbar = tqdm(range(num_steps))
     for i in pbar:
         state = env.get_state()

@@ -13,8 +13,9 @@ class DDPController(object):
         self.action_size = env.action_space.shape[-1]
         self.state_size = env.state_space.shape[-1]
         self.goal_state = torch.zeros(self.state_size)  # This is just a container for later use
-        self.Q = torch.diag(torch.tensor([5.0, 5.0, 5.0, 0.1, 0.1, 0.1]))
-        self.R = torch.diag(torch.tensor([0.0]))
+        self.Q = torch.diag(torch.tensor([20.0, 0.5, 5.0, 1.0, 1.0, 1.0]))
+        # self.Q = torch.diag(torch.tensor([50.0, 50.0, 50.0, 50.0, 50.0, 50.0]))
+        self.R = torch.diag(torch.tensor([0.01]))
         self.U = torch.zeros((self.T, self.action_size)) # nominal action sequence (T, action_size)
         self.u_init = torch.zeros(self.action_size)
         self.X = torch.zeros((self.T, self.state_size))
@@ -32,6 +33,7 @@ class DDPController(object):
         :param state: torch tensor of shape (state_size,)
         :return: action: torch tensor of shape (1,)
         """
+        # self.X = self._rollout_dynamics(state, self.U)
         self._backward_pass()
         self._foward_pass(state)
         # select optimal action
@@ -67,33 +69,42 @@ class DDPController(object):
         V_xx = torch.zeros((self.state_size, self.state_size, self.T+1))
 
         for i in reversed(range(self.T-1)):
-            mu_1 = 0
-            mu_2 = 0
+            mu_1 = 0.8
+            mu_2 = 0.2
             f_x, f_u, f_xx, f_ux, f_uu = self.find_f_gredient(self.X[i], self.U[i])
             L_x, L_u, L_xx, L_xu, L_uu = self.find_cost_gredient(self.X[i], self.U[i])
             # print(L_x.shape, f_x.T.shape, V_x[:, i+1:i+2].shape)
             Q_x = L_x + f_x.T @ V_x[:, i+1:i+2]
             # print(L_u.shape, f_u.T.shape, V_x[:, i+1:i+2].shape)
             Q_u = L_u + f_u.T @ V_x[:, i+1:i+2]
-            # print(L_xx.shape, f_x.T.shape, V_xx[:, :, i+1].shape, V_x[:, i+1:i+2].shape, f_xx.shape)
-            Q_xx = L_xx + f_x.T @ V_xx[:, :, i+1] @ f_x + (V_x[:, i+1:i+2].T @ f_xx).squeeze()
-            # print(L_xu.shape, f_u.T.shape, V_xx[:, :, i+1].shape, V_x[:, i+1:i+2].shape, f_ux.shape)
-            Q_ux = L_xu.T + f_u.T @ V_xx[:, :, i+1] @ f_x + V_x[:, i+1:i+2].T @ f_ux
-            # print(L_uu.shape, f_u.T.shape, V_xx[:, :, i+1].shape, V_x[:, i+1:i+2].shape, f_uu.shape)
-            Q_uu = L_uu + f_u.T @ V_xx[:, :, i+1] @ f_u + V_x[:, i+1:i+2].T @ f_uu
-            inv_Q_uu = None
-            while inv_Q_uu is None:
-                try:
-                    inv_Q_uu = torch.linalg.inv(Q_uu)
-                except:
-                    mu_1 += 0.1
-                    mu_2 += 0.1
-                    Q_xx = L_xx + f_x.T @ (V_xx[:, :, i+1] + mu_1 * torch.eye(6)) @ f_x
-                    Q_ux = L_xu.T + f_u.T @ (V_xx[:, :, i+1] + mu_1 * torch.eye(6)) @ f_x
-                    Q_uu = L_uu + f_u.T @ (V_xx[:, :, i+1] + mu_1 * torch.eye(6)) @ f_u + mu_2 * torch.eye(1)
-                
-            self.k[i] = -torch.linalg.inv(Q_uu) @ Q_u
-            self.K[i] = -torch.linalg.inv(Q_uu) @ Q_ux
+            # # print(L_xx.shape, f_x.T.shape, V_xx[:, :, i+1].shape, V_x[:, i+1:i+2].shape, f_xx.shape)
+            # Q_xx = L_xx + f_x.T @ V_xx[:, :, i+1] @ f_x + (V_x[:, i+1:i+2].T @ f_xx).squeeze()
+            # # print(L_xu.shape, f_u.T.shape, V_xx[:, :, i+1].shape, V_x[:, i+1:i+2].shape, f_ux.shape)
+            # Q_ux = L_xu.T + f_u.T @ V_xx[:, :, i+1] @ f_x + V_x[:, i+1:i+2].T @ f_ux
+            # # print(L_uu.shape, f_u.T.shape, V_xx[:, :, i+1].shape, V_x[:, i+1:i+2].shape, f_uu.shape)
+            # Q_uu = L_uu + f_u.T @ V_xx[:, :, i+1] @ f_u + V_x[:, i+1:i+2].T @ f_uu
+            #v2
+            # Q_xx = L_xx + f_x.T @ (V_xx[:, :, i+1] + mu_1 * torch.eye(6)) @ f_x + (V_x[:, i+1:i+2].T @ f_xx).squeeze()
+            # Q_ux = L_xu.T + f_u.T @ (V_xx[:, :, i+1] + mu_1 * torch.eye(6)) @ f_x + V_x[:, i+1:i+2].T @ f_ux
+            # Q_uu = L_uu + f_u.T @ (V_xx[:, :, i+1] + mu_1 * torch.eye(6)) @ f_u + V_x[:, i+1:i+2].T @ f_uu + mu_2 * torch.eye(1)
+
+            # inv_Q_uu = None
+            # while inv_Q_uu is None:
+            #     try:
+            #         inv_Q_uu = torch.linalg.inv(Q_uu)
+            #     except:
+            #         mu_1 += 0.1
+            #         mu_2 += 0.1
+            #         Q_xx = L_xx + f_x.T @ (V_xx[:, :, i+1] + mu_1 * torch.eye(6)) @ f_x
+            #         Q_ux = L_xu.T + f_u.T @ (V_xx[:, :, i+1] + mu_1 * torch.eye(6)) @ f_x
+            #         Q_uu = L_uu + f_u.T @ (V_xx[:, :, i+1] + mu_1 * torch.eye(6)) @ f_u + mu_2 * torch.eye(1)
+            Q_xx = L_xx + f_x.T @ (V_xx[:, :, i+1] + mu_1 * torch.eye(6)) @ f_x
+            Q_ux = L_xu.T + f_u.T @ (V_xx[:, :, i+1] + mu_1 * torch.eye(6)) @ f_x
+            Q_uu = L_uu + f_u.T @ (V_xx[:, :, i+1] + mu_1 * torch.eye(6)) @ f_u + mu_2 * torch.eye(1)
+            inv_Q_uu = torch.linalg.inv(Q_uu)
+            # print(inv_Q_uu, Q_u, Q_ux, L_uu)
+            self.k[i] = -inv_Q_uu @ Q_u
+            self.K[i] = -inv_Q_uu @ Q_ux
 
             V_0[i] = V_0[i+1] - Q_u.T @ inv_Q_uu @ Q_u /2 # +L_0
             # print(V_x[:, i].shape, Q_x.shape, Q_ux.T.shape, inv_Q_uu.shape, Q_u.shape)
@@ -104,10 +115,12 @@ class DDPController(object):
         x = torch.zeros_like(self.X)
         x[0] = state
         eps = 1
+        lr = 0.5
         for i in range(self.T-1):
             dx = x[i] - self.X[i]
-            print(self.k[i], self.K[i])
-            self.U[i] += eps*self.k[i] + self.K[i] @ dx
+            # print(self.k[i], self.K[i], dx)
+            self.U[i] += eps*self.k[i] + lr*self.K[i] @ dx
+            # print(self.U[i])
             x[i+1] = self._dynamics(x[i], self.U[i])
         self.X = x
 
@@ -241,6 +254,7 @@ class DDPController(object):
     #     L_xu = torch.zeros(6,1)
     #     L_uu = torch.zeros(1,1)
     #     return L_x, L_u, L_xx, L_xu, L_uu
+
     def find_cost_gredient(self, state, action):
         # Set the finite difference step size
         eps = 1e-3
@@ -252,21 +266,21 @@ class DDPController(object):
                 L_xx[i,j] = (f(state + eps*idx[i] + eps*idx[j], action)\
                     - f(state + eps*idx[i] - eps*idx[j], action)\
                     - f(state - eps*idx[i] + eps*idx[j], action)\
-                    - f(state - eps*idx[i] - eps*idx[j], action)) /4 /eps /eps
+                    + f(state - eps*idx[i] - eps*idx[j], action)) /4 /eps /eps
         L_xu = torch.zeros(6,1)
         for i in range(state.shape[0]):
             for j in range(action.shape[0]):
                 L_xu[i,j] = (f(state + eps*idx[i], action + eps)\
                     - f(state + eps*idx[i], action - eps)\
                     - f(state - eps*idx[i], action + eps)\
-                    - f(state - eps*idx[i], action - eps)) /4 /eps /eps
+                    + f(state - eps*idx[i], action - eps)) /4 /eps /eps
         L_uu = torch.zeros(1,1)
         for i in range(action.shape[0]):
             for j in range(action.shape[0]):
                 L_xu[i,j] = (f(state + eps*idx[i], action + eps)\
                     - f(state + eps*idx[i], action - eps)\
                     - f(state - eps*idx[i], action + eps)\
-                    - f(state - eps*idx[i], action - eps)) /4 /eps /eps
+                    + f(state - eps*idx[i], action - eps)) /4 /eps /eps
 
         idx1 = torch.tensor([1, 0, 0, 0, 0, 0])
         idx2 = torch.tensor([0, 1, 0, 0, 0, 0])
