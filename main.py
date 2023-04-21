@@ -12,8 +12,8 @@ from mppi_control import *
 from ddp_control import *
 
 def main():
-    # env = CartpoleEnv()
-    # env.reset(state = np.array([0.0, 0.25, 0.25, 0.0, 0.0, 0.0]))
+    env = CartpoleEnv()
+    env.reset(state = np.array([0.0, 0.25, 0.25, 0.0, 0.0, 0.0]))
 
     # frames=[] #frames to create animated png
     # frames.append(env.render())
