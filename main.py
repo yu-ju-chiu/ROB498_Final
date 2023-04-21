@@ -27,7 +27,7 @@ def main():
     # Image(filename="cartpole_example.png")
 
     # Linearization around 
-    env = CartpoleEnv()
+    # env = CartpoleEnv()
     # B = 4
     # states = 0.1 * torch.randn(B, 6)
     # actions = torch.randn(B, 1)
