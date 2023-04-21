@@ -56,6 +56,22 @@ def dynamics_analytic(state, action):
     
     return next_state
 
+# def linearize_pytorch(state, control):
+#     """f shape (4,) representing cartpole state
+#         control: torch.tensor of shape (1,) representing the force to apply
+#     Returns:
+#         A: torch.tensor of shape (4, 4) representing Jacobian df/dx for dynamics f
+#         B: torch.tensor of shape (4, 1) representing Jacobian df/du for dynamics f
+#     """
+#     A, B = None, None
+#     # --- Your code here
+#     state = torch.reshape(state, (1, 6))
+#     control = torch.reshape(control, (1, 1))
+#     A, B = jacobian(dynamics_analytic,(state,control))
+#     A, B = A[0, :, 0, :,0, :], B[0, :, 0, :,0, :]
+#     # ---
+#     return A, B
+
 def linearize_pytorch(state, control):
     """f shape (4,) representing cartpole state
         control: torch.tensor of shape (1,) representing the force to apply
