@@ -13,7 +13,7 @@ class DDPController(object):
         self.state_size = env.state_space.shape[-1]
         self.goal_state = torch.zeros(self.state_size)  # This is just a container for later use
         self.Q = torch.diag(torch.tensor([5.0, 5.0, 5.0, 0.1, 0.1, 0.1]))
-        self.R = torch.diag(torch.tensor([0.1]))
+        self.R = torch.diag(torch.tensor([0.0]))
         self.U = torch.zeros((self.T, self.action_size)) # nominal action sequence (T, action_size)
         self.u_init = torch.zeros(self.action_size)
         self.X = torch.zeros((self.T, self.state_size))
@@ -22,7 +22,8 @@ class DDPController(object):
         self.K = torch.zeros((self.T, self.action_size, self.state_size))
 
     def reset(self):
-        self.U = torch.zeros((self.T, self.action_size))# nominal action sequence (T, action_size)
+        self.U = torch.zeros((self.T, self.action_size)) # nominal action sequence (T, action_size)
+        self.X = self._rollout_dynamics(self.x_init, actions=self.U) # nominal state sequence (T, state_size)
 
     def command(self, state):
         """
@@ -30,10 +31,8 @@ class DDPController(object):
         :param state: torch tensor of shape (state_size,)
         :return: action: torch tensor of shape (1,)
         """
-        self.X = self._rollout_dynamics(state, actions=self.U)
-        trajectory_cost = self._compute_trajectory_cost(self.X)
         self._backward_pass()
-        self._foward_pass()
+        self._foward_pass(state)
         # select optimal action
         action = self.U[0]
         # final update nominal trajectory
@@ -69,13 +68,18 @@ class DDPController(object):
         for i in reversed(range(self.T-1)):
             mu_1 = 0
             mu_2 = 0
-            f_x, f_u, f_ux, f_xx, f_uu = self.find_f_gredient(self.X[i], self.U[i])
+            f_x, f_u, f_xx, f_ux, f_uu = self.find_f_gredient(self.X[i], self.U[i])
             L_x, L_u, L_xx, L_xu, L_uu = self.find_cost_gredient(self.X[i], self.U[i])
-            Q_x = L_x + f_x.T @ V_x[i+1]
-            Q_u = L_u + f_u.T @ V_x[i+1]
-            Q_xx = L_xx + f_x.T @ V_xx[i+1] @ f_x + V_x[i+1] @ f_xx
-            Q_ux = L_xu + f_u.T @ V_xx[i+1] @ f_x + V_x[i+1] @ f_ux
-            Q_uu = L_uu + f_u.T @ V_xx[i+1] @ f_u + V_x[i+1] @ f_uu
+            # print(L_x.shape, f_x.T.shape, V_x[:, i+1:i+2].shape)
+            Q_x = L_x + f_x.T @ V_x[:, i+1:i+2]
+            # print(L_u.shape, f_u.T.shape, V_x[:, i+1:i+2].shape)
+            Q_u = L_u + f_u.T @ V_x[:, i+1:i+2]
+            # print(L_xx.shape, f_x.T.shape, V_xx[:, :, i+1].shape, V_x[:, i+1:i+2].shape, f_xx.shape)
+            Q_xx = L_xx + f_x.T @ V_xx[:, :, i+1] @ f_x + V_x[:, i+1:i+2].T @ f_xx
+            # print(L_xu.shape, f_u.T.shape, V_xx[:, :, i+1].shape, V_x[:, i+1:i+2].shape, f_ux.shape)
+            Q_ux = L_xu.T + f_u.T @ V_xx[:, :, i+1] @ f_x + V_x[:, i+1:i+2].T @ f_ux
+            # print(L_uu.shape, f_u.T.shape, V_xx[:, :, i+1].shape, V_x[:, i+1:i+2].shape, f_uu.shape)
+            Q_uu = L_uu + f_u.T @ V_xx[:, :, i+1] @ f_u + V_x[:, i+1:i+2].T @ f_uu
             inv_Q_uu = None
             while inv_Q_uu is None:
                 try:
@@ -83,21 +87,28 @@ class DDPController(object):
                 except:
                     mu_1 += 0.1
                     mu_2 += 0.1
+                    Q_xx = L_xx + f_x.T @ (V_xx[:, :, i+1] + mu_1 * torch.eye(6)) @ f_x
+                    Q_ux = L_xu.T + f_u.T @ (V_xx[:, :, i+1] + mu_1 * torch.eye(6)) @ f_x
+                    Q_uu = L_uu + f_u.T @ (V_xx[:, :, i+1] + mu_1 * torch.eye(6)) @ f_u + mu_2 * torch.eye(1)
+                
             self.k[i] = -torch.linalg.inv(Q_uu) @ Q_u
             self.K[i] = -torch.linalg.inv(Q_uu) @ Q_ux
 
             V_0[i] = V_0[i+1] - Q_u.T @ inv_Q_uu @ Q_u /2 # +L_0
-            V_x[i] = Q_x - Q_ux.T @ inv_Q_uu @ Q_u
-            V_xx[i] = Q_xx - Q_ux.T @ inv_Q_uu @ Q_ux
+            # print(V_x[:, i].shape, Q_x.shape, Q_ux.T.shape, inv_Q_uu.shape, Q_u.shape)
+            V_x[:, i] = (Q_x - Q_ux.T @ inv_Q_uu @ Q_u).squeeze()
+            V_xx[:, :, i] = Q_xx - Q_ux.T @ inv_Q_uu @ Q_ux
 
-    def _foward_pass(self):
-        x = self.X
-        dx = torch.zeros_like(self.X)
+    def _foward_pass(self, state):
+        x = torch.zeros_like(self.X)
+        x[0] = state
         eps = 1
         for i in range(self.T-1):
-            dx[i] = x[i] - self.X[i]
-            self.U[i] += eps*self.k[i] + self.K[i] @ dx[i]
+            dx = x[i] - self.X[i]
+            print(self.k[i], self.K[i])
+            self.U[i] += eps*self.k[i] + self.K[i] @ dx
             x[i+1] = self._dynamics(x[i], self.U[i])
+        self.X = x
 
     def _compute_cost(self, states, actions):
         """
@@ -111,7 +122,6 @@ class DDPController(object):
         * State cost should be quadratic as (state_i-goal_state)^T Q (state_i-goal_state)
         * Action costs "TODO"
         """
-        
         total_cost = None
         # Define the state cost weight matrix Q
         Q = self.Q
@@ -122,8 +132,7 @@ class DDPController(object):
         actions = actions[:, None]
         states = states[:, None]
 
-
-        state_errors = states - self.goal_state
+        state_errors = states - self.goal_state[:, None]
         state_costs = state_errors.T @ Q @ state_errors
         control_costs = actions.T @ R @ actions
         total_cost = state_costs + control_costs
@@ -150,7 +159,7 @@ class DDPController(object):
         R = self.R
 
         # Compute the state costs
-        state_errors = trajectory_states - self.goal_state.repeat(self.T, 1)
+        state_errors = trajectory_states - self.goal_state[None, :].repeat(self.T, 1)
         state_costs = torch.sum(state_errors.T @ Q @ state_errors, axis=1)
         control_costs = torch.sum(trajectory_acrions.T @ R @ trajectory_acrions, axis=1)
 
@@ -169,3 +178,54 @@ class DDPController(object):
         next_state = self.env.dynamics(state.cpu().detach().numpy(), action.cpu().detach().numpy())
         next_state = torch.tensor(next_state, dtype=state.dtype)
         return next_state
+    
+    def find_f_gredient(self, state, action):
+        f_x, f_u = self.env.linearize_numerical(state, action)
+        f_x = torch.from_numpy(f_x).type(torch.float32)
+        f_u = torch.from_numpy(f_u).type(torch.float32)
+        f = self.env.dynamics
+        eps = 1e-3
+        f_xx = torch.zeros(6,6)
+        f_xu = torch.zeros(6,1)
+        f_uu = torch.zeros(6,1)
+        idx1 = torch.tensor([1, 0, 0, 0, 0, 0])
+        idx2 = torch.tensor([0, 1, 0, 0, 0, 0])
+        idx3 = torch.tensor([0, 0, 1, 0, 0, 0])
+        idx4 = torch.tensor([0, 0, 0, 1, 0, 0])
+        idx5 = torch.tensor([0, 0, 0, 0, 1, 0])
+        idx6 = torch.tensor([0, 0, 0, 0, 0, 1])
+        A1 = (f(state+eps*idx1, action)-f(state-eps*idx1, action)) /2 /eps
+        A2 = (f(state+eps*idx2, action)-f(state-eps*idx2, action)) /2 /eps
+        A3 = (f(state+eps*idx3, action)-f(state-eps*idx3, action)) /2 /eps
+        A4 = (f(state+eps*idx4, action)-f(state-eps*idx4, action)) /2 /eps
+        A5 = (f(state+eps*idx5, action)-f(state-eps*idx5, action)) /2 /eps
+        A6 = (f(state+eps*idx6, action)-f(state-eps*idx6, action)) /2 /eps
+        L_u = (f(state, action+eps)-f(state, action-eps)) /2 /eps
+        L_x = torch.vstack((A1, A2, A3, A4, A5, A6))
+        return f_x, f_u, f_xx, f_xu, f_uu
+
+
+    def find_cost_gredient(self, state, action):
+        # Set the finite difference step size
+        eps = 1e-3
+        f = self._compute_cost
+        idx1 = torch.tensor([1, 0, 0, 0, 0, 0])
+        idx2 = torch.tensor([0, 1, 0, 0, 0, 0])
+        idx3 = torch.tensor([0, 0, 1, 0, 0, 0])
+        idx4 = torch.tensor([0, 0, 0, 1, 0, 0])
+        idx5 = torch.tensor([0, 0, 0, 0, 1, 0])
+        idx6 = torch.tensor([0, 0, 0, 0, 0, 1])
+        A1 = (f(state+eps*idx1, action)-f(state-eps*idx1, action)) /2 /eps
+        A2 = (f(state+eps*idx2, action)-f(state-eps*idx2, action)) /2 /eps
+        A3 = (f(state+eps*idx3, action)-f(state-eps*idx3, action)) /2 /eps
+        A4 = (f(state+eps*idx4, action)-f(state-eps*idx4, action)) /2 /eps
+        A5 = (f(state+eps*idx5, action)-f(state-eps*idx5, action)) /2 /eps
+        A6 = (f(state+eps*idx6, action)-f(state-eps*idx6, action)) /2 /eps
+        L_u = (f(state, action+eps)-f(state, action-eps)) /2 /eps
+        L_x = torch.vstack((A1, A2, A3, A4, A5, A6))
+        # print(L_x.shape, L_u.shape)
+
+        L_xx = torch.zeros(6,6)
+        L_xu = torch.zeros(6,1)
+        L_uu = torch.zeros(1,1)
+        return L_x, L_u, L_xx, L_xu, L_uu
