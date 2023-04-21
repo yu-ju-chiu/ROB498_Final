@@ -137,10 +137,12 @@ def main():
     # DDP
     # Define problem parameters
     env = CartpoleEnv()
-    env.reset(np.array([0, np.pi, 0, 0, 0, 0]) + np.random.rand(6,)) 
+    start_state = np.array([0, np.pi, 0, 0, 0, 0]) # + np.random.rand(6,) 
+    env.reset(start_state)
     goal_state = np.zeros(6)
-    controller = DDPController(env, horizon=10)
+    controller = DDPController(env, horizon=30)
     controller.goal_state = torch.tensor(goal_state, dtype=torch.float32)
+    controller.reset(torch.tensor(start_state, dtype=torch.float32))
     frames = []
     num_steps = 100
     pbar = tqdm(range(num_steps))
