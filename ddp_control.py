@@ -1,5 +1,6 @@
 import torch
 
+
 class DDPController(object):
 
     def __init__(self, env, horizon):
@@ -205,10 +206,60 @@ class DDPController(object):
         return f_x, f_u, f_xx, f_xu, f_uu
 
 
+    # def find_cost_gredient(self, state, action):
+    #     # Set the finite difference step size
+    #     eps = 1e-3
+    #     f = self._compute_cost
+    #     idx1 = torch.tensor([1, 0, 0, 0, 0, 0])
+    #     idx2 = torch.tensor([0, 1, 0, 0, 0, 0])
+    #     idx3 = torch.tensor([0, 0, 1, 0, 0, 0])
+    #     idx4 = torch.tensor([0, 0, 0, 1, 0, 0])
+    #     idx5 = torch.tensor([0, 0, 0, 0, 1, 0])
+    #     idx6 = torch.tensor([0, 0, 0, 0, 0, 1])
+    #     A1 = (f(state+eps*idx1, action)-f(state-eps*idx1, action)) /2 /eps
+    #     A2 = (f(state+eps*idx2, action)-f(state-eps*idx2, action)) /2 /eps
+    #     A3 = (f(state+eps*idx3, action)-f(state-eps*idx3, action)) /2 /eps
+    #     A4 = (f(state+eps*idx4, action)-f(state-eps*idx4, action)) /2 /eps
+    #     A5 = (f(state+eps*idx5, action)-f(state-eps*idx5, action)) /2 /eps
+    #     A6 = (f(state+eps*idx6, action)-f(state-eps*idx6, action)) /2 /eps
+    #     L_u = (f(state, action+eps)-f(state, action-eps)) /2 /eps
+    #     L_x = torch.vstack((A1, A2, A3, A4, A5, A6))
+    #     # print(L_x.shape, L_u.shape)
+
+    #     L_xx = torch.zeros(6,6)
+    #     L_xu = torch.zeros(6,1)
+    #     L_uu = torch.zeros(1,1)
+    #     return L_x, L_u, L_xx, L_xu, L_uu
     def find_cost_gredient(self, state, action):
         # Set the finite difference step size
         eps = 1e-3
+        idx = torch.eye(6)
         f = self._compute_cost
+        L_xx = torch.zeros(6, 6)
+        for i in range(state.shape[0]):
+            for j in range(state.shape[0]):
+                L_xx[i,j] = (f(state + eps*idx[i] + eps*idx[j], action)\
+                    - f(state + eps*idx[i] - eps*idx[j], action)\
+                    - f(state - eps*idx[i] + eps*idx[j], action)\
+                    - f(state - eps*idx[i] - eps*idx[j], action)) /4 /eps /eps
+        L_xu = torch.zeros(6,1)
+        for i in range(state.shape[0]):
+            for j in range(action.shape[0]):
+                L_xu[i,j] = (f(state + eps*idx[i], action + eps*idx[j])\
+                    - f(state + eps*idx[i], action - eps*idx[j])\
+                    - f(state - eps*idx[i], action + eps*idx[j])\
+                    - f(state - eps*idx[i], action - eps*idx[j])) /4 /eps /eps
+        L_uu = torch.zeros(1,1)
+        for i in range(action.shape[0]):
+            for j in range(action.shape[0]):
+                L_xu[i,j] = (f(state + eps*idx[i], action + eps*idx[j])\
+                    - f(state + eps*idx[i], action - eps*idx[j])\
+                    - f(state - eps*idx[i], action + eps*idx[j])\
+                    - f(state - eps*idx[i], action - eps*idx[j])) /4 /eps /eps
+
+
+        torch.tensor(np.array([[1, 0, 0, 0, 0, 0], [4, 5, 6]]))
+
         idx1 = torch.tensor([1, 0, 0, 0, 0, 0])
         idx2 = torch.tensor([0, 1, 0, 0, 0, 0])
         idx3 = torch.tensor([0, 0, 1, 0, 0, 0])
@@ -225,7 +276,7 @@ class DDPController(object):
         L_x = torch.vstack((A1, A2, A3, A4, A5, A6))
         # print(L_x.shape, L_u.shape)
 
-        L_xx = torch.zeros(6,6)
-        L_xu = torch.zeros(6,1)
-        L_uu = torch.zeros(1,1)
+        # L_xx = torch.zeros(6,6)
+        # L_xu = torch.zeros(6,1)
+        # L_uu = torch.zeros(1,1)
         return L_x, L_u, L_xx, L_xu, L_uu
