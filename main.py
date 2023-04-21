@@ -142,7 +142,7 @@ def main():
     controller = DDPController(env, horizon=30)
     controller.goal_state = torch.tensor(goal_state, dtype=torch.float32)
     frames = []
-    num_steps = 1
+    num_steps = 2
     pbar = tqdm(range(num_steps))
     for i in pbar:
         state = env.get_state()

@@ -76,7 +76,7 @@ class DDPController(object):
             # print(L_u.shape, f_u.T.shape, V_x[:, i+1:i+2].shape)
             Q_u = L_u + f_u.T @ V_x[:, i+1:i+2]
             # print(L_xx.shape, f_x.T.shape, V_xx[:, :, i+1].shape, V_x[:, i+1:i+2].shape, f_xx.shape)
-            Q_xx = L_xx + f_x.T @ V_xx[:, :, i+1] @ f_x + V_x[:, i+1:i+2].T @ f_xx
+            Q_xx = L_xx + f_x.T @ V_xx[:, :, i+1] @ f_x + (V_x[:, i+1:i+2].T @ f_xx).squeeze()
             # print(L_xu.shape, f_u.T.shape, V_xx[:, :, i+1].shape, V_x[:, i+1:i+2].shape, f_ux.shape)
             Q_ux = L_xu.T + f_u.T @ V_xx[:, :, i+1] @ f_x + V_x[:, i+1:i+2].T @ f_ux
             # print(L_uu.shape, f_u.T.shape, V_xx[:, :, i+1].shape, V_x[:, i+1:i+2].shape, f_uu.shape)
@@ -256,20 +256,17 @@ class DDPController(object):
         L_xu = torch.zeros(6,1)
         for i in range(state.shape[0]):
             for j in range(action.shape[0]):
-                L_xu[i,j] = (f(state + eps*idx[i], action + eps*idx[j])\
-                    - f(state + eps*idx[i], action - eps*idx[j])\
-                    - f(state - eps*idx[i], action + eps*idx[j])\
-                    - f(state - eps*idx[i], action - eps*idx[j])) /4 /eps /eps
+                L_xu[i,j] = (f(state + eps*idx[i], action + eps)\
+                    - f(state + eps*idx[i], action - eps)\
+                    - f(state - eps*idx[i], action + eps)\
+                    - f(state - eps*idx[i], action - eps)) /4 /eps /eps
         L_uu = torch.zeros(1,1)
         for i in range(action.shape[0]):
             for j in range(action.shape[0]):
-                L_xu[i,j] = (f(state + eps*idx[i], action + eps*idx[j])\
-                    - f(state + eps*idx[i], action - eps*idx[j])\
-                    - f(state - eps*idx[i], action + eps*idx[j])\
-                    - f(state - eps*idx[i], action - eps*idx[j])) /4 /eps /eps
-
-
-        torch.tensor(np.array([[1, 0, 0, 0, 0, 0], [4, 5, 6]]))
+                L_xu[i,j] = (f(state + eps*idx[i], action + eps)\
+                    - f(state + eps*idx[i], action - eps)\
+                    - f(state - eps*idx[i], action + eps)\
+                    - f(state - eps*idx[i], action - eps)) /4 /eps /eps
 
         idx1 = torch.tensor([1, 0, 0, 0, 0, 0])
         idx2 = torch.tensor([0, 1, 0, 0, 0, 0])
