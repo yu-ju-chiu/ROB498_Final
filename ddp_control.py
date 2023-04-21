@@ -13,7 +13,7 @@ class DDPController(object):
         self.state_size = env.state_space.shape[-1]
         self.goal_state = torch.zeros(self.state_size)  # This is just a container for later use
         self.Q = torch.diag(torch.tensor([5.0, 5.0, 5.0, 0.1, 0.1, 0.1]))
-        self.R = torch.diag(torch.tensor([0.1]))
+        self.R = torch.diag(torch.tensor([0.0]))
         self.U = torch.zeros((self.T, self.action_size)) # nominal action sequence (T, action_size)
         self.u_init = torch.zeros(self.action_size)
         self.X = torch.zeros((self.T, self.state_size))
@@ -70,11 +70,16 @@ class DDPController(object):
             mu_2 = 0
             f_x, f_u, f_xx, f_ux, f_uu = self.find_f_gredient(self.X[i], self.U[i])
             L_x, L_u, L_xx, L_xu, L_uu = self.find_cost_gredient(self.X[i], self.U[i])
-            Q_x = L_x + f_x.T @ V_x[i+1]
-            Q_u = L_u + f_u.T @ V_x[i+1]
-            Q_xx = L_xx + f_x.T @ V_xx[i+1] @ f_x + V_x[i+1] @ f_xx
-            Q_ux = L_xu + f_u.T @ V_xx[i+1] @ f_x + V_x[i+1] @ f_ux
-            Q_uu = L_uu + f_u.T @ V_xx[i+1] @ f_u + V_x[i+1] @ f_uu
+            # print(L_x.shape, f_x.T.shape, V_x[:, i+1:i+2].shape)
+            Q_x = L_x + f_x.T @ V_x[:, i+1:i+2]
+            # print(L_u.shape, f_u.T.shape, V_x[:, i+1:i+2].shape)
+            Q_u = L_u + f_u.T @ V_x[:, i+1:i+2]
+            # print(L_xx.shape, f_x.T.shape, V_xx[:, :, i+1].shape, V_x[:, i+1:i+2].shape, f_xx.shape)
+            Q_xx = L_xx + f_x.T @ V_xx[:, :, i+1] @ f_x + V_x[:, i+1:i+2].T @ f_xx
+            # print(L_xu.shape, f_u.T.shape, V_xx[:, :, i+1].shape, V_x[:, i+1:i+2].shape, f_ux.shape)
+            Q_ux = L_xu.T + f_u.T @ V_xx[:, :, i+1] @ f_x + V_x[:, i+1:i+2].T @ f_ux
+            # print(L_uu.shape, f_u.T.shape, V_xx[:, :, i+1].shape, V_x[:, i+1:i+2].shape, f_uu.shape)
+            Q_uu = L_uu + f_u.T @ V_xx[:, :, i+1] @ f_u + V_x[:, i+1:i+2].T @ f_uu
             inv_Q_uu = None
             while inv_Q_uu is None:
                 try:
@@ -82,12 +87,17 @@ class DDPController(object):
                 except:
                     mu_1 += 0.1
                     mu_2 += 0.1
+                    Q_xx = L_xx + f_x.T @ (V_xx[:, :, i+1] + mu_1 * torch.eye(6)) @ f_x
+                    Q_ux = L_xu.T + f_u.T @ (V_xx[:, :, i+1] + mu_1 * torch.eye(6)) @ f_x
+                    Q_uu = L_uu + f_u.T @ (V_xx[:, :, i+1] + mu_1 * torch.eye(6)) @ f_u + mu_2 * torch.eye(1)
+                
             self.k[i] = -torch.linalg.inv(Q_uu) @ Q_u
             self.K[i] = -torch.linalg.inv(Q_uu) @ Q_ux
 
             V_0[i] = V_0[i+1] - Q_u.T @ inv_Q_uu @ Q_u /2 # +L_0
-            V_x[i] = Q_x - Q_ux.T @ inv_Q_uu @ Q_u
-            V_xx[i] = Q_xx - Q_ux.T @ inv_Q_uu @ Q_ux
+            # print(V_x[:, i].shape, Q_x.shape, Q_ux.T.shape, inv_Q_uu.shape, Q_u.shape)
+            V_x[:, i] = (Q_x - Q_ux.T @ inv_Q_uu @ Q_u).squeeze()
+            V_xx[:, :, i] = Q_xx - Q_ux.T @ inv_Q_uu @ Q_ux
 
     def _foward_pass(self, state):
         x = torch.zeros_like(self.X)
@@ -95,6 +105,7 @@ class DDPController(object):
         eps = 1
         for i in range(self.T-1):
             dx = x[i] - self.X[i]
+            print(self.k[i], self.K[i])
             self.U[i] += eps*self.k[i] + self.K[i] @ dx
             x[i+1] = self._dynamics(x[i], self.U[i])
         self.X = x
@@ -111,7 +122,6 @@ class DDPController(object):
         * State cost should be quadratic as (state_i-goal_state)^T Q (state_i-goal_state)
         * Action costs "TODO"
         """
-        
         total_cost = None
         # Define the state cost weight matrix Q
         Q = self.Q
@@ -122,8 +132,7 @@ class DDPController(object):
         actions = actions[:, None]
         states = states[:, None]
 
-
-        state_errors = states - self.goal_state
+        state_errors = states - self.goal_state[:, None]
         state_costs = state_errors.T @ Q @ state_errors
         control_costs = actions.T @ R @ actions
         total_cost = state_costs + control_costs
@@ -150,7 +159,7 @@ class DDPController(object):
         R = self.R
 
         # Compute the state costs
-        state_errors = trajectory_states - self.goal_state.repeat(self.T, 1)
+        state_errors = trajectory_states - self.goal_state[None, :].repeat(self.T, 1)
         state_costs = torch.sum(state_errors.T @ Q @ state_errors, axis=1)
         control_costs = torch.sum(trajectory_acrions.T @ R @ trajectory_acrions, axis=1)
 
@@ -172,185 +181,51 @@ class DDPController(object):
     
     def find_f_gredient(self, state, action):
         f_x, f_u = self.env.linearize_numerical(state, action)
+        f_x = torch.from_numpy(f_x).type(torch.float32)
+        f_u = torch.from_numpy(f_u).type(torch.float32)
         f = self.env.dynamics
-        # Set the finite difference step size
         eps = 1e-3
-        # Compute the Hessian matrix of the output state with respect to the input state
-        f_xx = torch.zeros(state.shape[0], state.shape[0])
-        for i in range(state.shape[0]):
-            for j in range(i, state.shape[0]):
-                # Compute the second-order partial derivative with respect to state_i and state_j
-                x_plus_i = state.clone()
-                x_plus_i[i] += eps
-                x_minus_i = state.clone()
-                x_minus_i[i] -= eps
-                x_plus_j = state.clone()
-                x_plus_j[j] += eps
-                x_minus_j = state.clone()
-                x_minus_j[j] -= eps
-
-                output_plus_ii = f(x_plus_i, action)
-                output_minus_ii = f(x_minus_i, action)
-                output_plus_jj = f(x_plus_j, action)
-                output_minus_jj = f(x_minus_j, action)
-                output_plus_ij = f(x_plus_i, action)
-                output_plus_ij[i] = output_plus_jj[i]
-                output_minus_ij = f(x_minus_i, action)
-                output_minus_ij[i] = output_minus_jj[i]
-
-                f_xx[i, j] = (output_plus_ii - output_minus_ii - output_plus_ij + output_minus_ij) / (4*eps*eps)
-                f_xx[j, i] = f_xx[i, j]
-
-        # Compute the Hessian matrix of the output state with respect to the input action and state
-        f_xu = torch.zeros(state.shape[0], action.shape[0])
-        for i in range(state.shape[0]):
-            for j in range(action.shape[0]):
-                # Compute the second-order partial derivative with respect to state_i and action_j
-                x_plus_i = state.clone()
-                x_plus_i[i] += eps
-                x_minus_i = state.clone()
-                x_minus_i[i] -= eps
-                u_plus_j = action.clone()
-                u_plus_j[j] += eps
-                u_minus_j = action.clone()
-                u_minus_j[j] -= eps
-
-                output_plus_ui = f(x_plus_i, u_plus_j)
-                output_minus_ui = f(x_minus_i, u_plus_j)
-                output_plus_uj = f(state, u_plus_j)
-                output_plus_uj[j] = f(state, u_minus_j)[j]
-                output_minus_uj = f(state, u_minus_j)
-                output_minus_uj[j] = f(state, u_plus_j)[j]
-
-                f_xu[i, j] = (output_plus_ui - output_minus_ui - output_plus_uj + output_minus_uj) / (4*eps*eps)
-
-        f_uu = torch.zeros(action.shape[0], action.shape[0])
-        for i in range(action.shape[0]):
-            for j in range(i, action.shape[0]):
-                # Compute the second-order partial derivative with respect to action_i and action_j
-                u_plus_i = action.clone()
-                u_plus_i[i] += eps
-                u_minus_i = action.clone()
-                u_minus_i[i] -= eps
-                u_plus_j = action.clone()
-                u_plus_j[j] += eps
-                u_minus_j = action.clone()
-                u_minus_j[j] -= eps
-
-                output_plus_ii = f(state, u_plus_i)
-                output_minus_ii = f(state, u_minus_i)
-                output_plus_jj = f(state, u_plus_j)
-                output_minus_jj = f(state, u_minus_j)
-                output_plus_ij = f(state, u_plus_i)
-                output_plus_ij[i] = f(state, u_plus_j)[i]
-                output_minus_ij = f(state, u_minus_i)
-                output_minus_ij[i] = f(state, u_minus_j)[i]
-
-                f_uu[i, j] = (output_plus_ii - output_minus_ii - output_plus_ij + output_minus_ij) / (4*eps*eps)
-                f_uu[j, i] = f_uu[i, j]
-
+        f_xx = torch.zeros(6,6)
+        f_xu = torch.zeros(6,1)
+        f_uu = torch.zeros(6,1)
+        idx1 = torch.tensor([1, 0, 0, 0, 0, 0])
+        idx2 = torch.tensor([0, 1, 0, 0, 0, 0])
+        idx3 = torch.tensor([0, 0, 1, 0, 0, 0])
+        idx4 = torch.tensor([0, 0, 0, 1, 0, 0])
+        idx5 = torch.tensor([0, 0, 0, 0, 1, 0])
+        idx6 = torch.tensor([0, 0, 0, 0, 0, 1])
+        A1 = (f(state+eps*idx1, action)-f(state-eps*idx1, action)) /2 /eps
+        A2 = (f(state+eps*idx2, action)-f(state-eps*idx2, action)) /2 /eps
+        A3 = (f(state+eps*idx3, action)-f(state-eps*idx3, action)) /2 /eps
+        A4 = (f(state+eps*idx4, action)-f(state-eps*idx4, action)) /2 /eps
+        A5 = (f(state+eps*idx5, action)-f(state-eps*idx5, action)) /2 /eps
+        A6 = (f(state+eps*idx6, action)-f(state-eps*idx6, action)) /2 /eps
+        L_u = (f(state, action+eps)-f(state, action-eps)) /2 /eps
+        L_x = torch.vstack((A1, A2, A3, A4, A5, A6))
         return f_x, f_u, f_xx, f_xu, f_uu
 
 
     def find_cost_gredient(self, state, action):
         # Set the finite difference step size
         eps = 1e-3
-        f = self.cost_function
-        # Compute the partial derivatives of the output state with respect to the input tensors
-        L_x = torch.zeros_like(state)
-        L_u = torch.zeros_like(action)
+        f = self._compute_cost
+        idx1 = torch.tensor([1, 0, 0, 0, 0, 0])
+        idx2 = torch.tensor([0, 1, 0, 0, 0, 0])
+        idx3 = torch.tensor([0, 0, 1, 0, 0, 0])
+        idx4 = torch.tensor([0, 0, 0, 1, 0, 0])
+        idx5 = torch.tensor([0, 0, 0, 0, 1, 0])
+        idx6 = torch.tensor([0, 0, 0, 0, 0, 1])
+        A1 = (f(state+eps*idx1, action)-f(state-eps*idx1, action)) /2 /eps
+        A2 = (f(state+eps*idx2, action)-f(state-eps*idx2, action)) /2 /eps
+        A3 = (f(state+eps*idx3, action)-f(state-eps*idx3, action)) /2 /eps
+        A4 = (f(state+eps*idx4, action)-f(state-eps*idx4, action)) /2 /eps
+        A5 = (f(state+eps*idx5, action)-f(state-eps*idx5, action)) /2 /eps
+        A6 = (f(state+eps*idx6, action)-f(state-eps*idx6, action)) /2 /eps
+        L_u = (f(state, action+eps)-f(state, action-eps)) /2 /eps
+        L_x = torch.vstack((A1, A2, A3, A4, A5, A6))
+        # print(L_x.shape, L_u.shape)
 
-        for i in range(state.shape[0]):
-            # Compute the partial derivative with respect to state_i
-            x_plus = state.clone()
-            x_plus[i] += eps
-            x_minus = state.clone()
-            x_minus[i] -= eps
-            output_plus = f(x_plus, action)
-            output_minus = f(x_minus, action)
-            L_x[i] = (output_plus - output_minus) / (2*eps)
-
-        for i in range(action.shape[0]):
-            # Compute the partial derivative with respect to action_i
-            u_plus = action.clone()
-            u_plus[i] += eps
-            u_minus = action.clone()
-            u_minus[i] -= eps
-            output_plus = f(state, u_plus)
-            output_minus = f(state, u_minus)
-            L_u[i] = (output_plus - output_minus) / (2*eps)
-        
-        # Compute the Hessian matrix of the output state with respect to the input state
-        L_xx = torch.zeros(state.shape[0], state.shape[0])
-        for i in range(state.shape[0]):
-            for j in range(i, state.shape[0]):
-                # Compute the second-order partial derivative with respect to state_i and state_j
-                x_plus_i = state.clone()
-                x_plus_i[i] += eps
-                x_minus_i = state.clone()
-                x_minus_i[i] -= eps
-                x_plus_j = state.clone()
-                x_plus_j[j] += eps
-                x_minus_j = state.clone()
-                x_minus_j[j] -= eps
-
-                output_plus_ii = f(x_plus_i, action)
-                output_minus_ii = f(x_minus_i, action)
-                output_plus_jj = f(x_plus_j, action)
-                output_minus_jj = f(x_minus_j, action)
-                output_plus_ij = f(x_plus_i, action)
-                output_plus_ij[i] = output_plus_jj[i]
-                output_minus_ij = f(x_minus_i, action)
-                output_minus_ij[i] = output_minus_jj[i]
-
-                L_xx[i, j] = (output_plus_ii - output_minus_ii - output_plus_ij + output_minus_ij) / (4*eps*eps)
-                L_xx[j, i] = L_xx[i, j]
-
-        # Compute the Hessian matrix of the output state with respect to the input action and state
-        L_xu = torch.zeros(state.shape[0], action.shape[0])
-        for i in range(state.shape[0]):
-            for j in range(action.shape[0]):
-                # Compute the second-order partial derivative with respect to state_i and action_j
-                x_plus_i = state.clone()
-                x_plus_i[i] += eps
-                x_minus_i = state.clone()
-                x_minus_i[i] -= eps
-                u_plus_j = action.clone()
-                u_plus_j[j] += eps
-                u_minus_j = action.clone()
-                u_minus_j[j] -= eps
-
-                output_plus_ui = f(x_plus_i, u_plus_j)
-                output_minus_ui = f(x_minus_i, u_plus_j)
-                output_plus_uj = f(state, u_plus_j)
-                output_plus_uj[j] = f(state, u_minus_j)[j]
-                output_minus_uj = f(state, u_minus_j)
-                output_minus_uj[j] = f(state, u_plus_j)[j]
-
-                L_xu[i, j] = (output_plus_ui - output_minus_ui - output_plus_uj + output_minus_uj) / (4*eps*eps)
-
-        L_uu = torch.zeros(action.shape[0], action.shape[0])
-        for i in range(action.shape[0]):
-            for j in range(i, action.shape[0]):
-                # Compute the second-order partial derivative with respect to action_i and action_j
-                u_plus_i = action.clone()
-                u_plus_i[i] += eps
-                u_minus_i = action.clone()
-                u_minus_i[i] -= eps
-                u_plus_j = action.clone()
-                u_plus_j[j] += eps
-                u_minus_j = action.clone()
-                u_minus_j[j] -= eps
-
-                output_plus_ii = f(state, u_plus_i)
-                output_minus_ii = f(state, u_minus_i)
-                output_plus_jj = f(state, u_plus_j)
-                output_minus_jj = f(state, u_minus_j)
-                output_plus_ij = f(state, u_plus_i)
-                output_plus_ij[i] = f(state, u_plus_j)[i]
-                output_minus_ij = f(state, u_minus_i)
-                output_minus_ij[i] = f(state, u_minus_j)[i]
-
-                L_uu[i, j] = (output_plus_ii - output_minus_ii - output_plus_ij + output_minus_ij) / (4*eps*eps)
-                L_uu[j, i] = L_uu[i, j]
+        L_xx = torch.zeros(6,6)
+        L_xu = torch.zeros(6,1)
+        L_uu = torch.zeros(1,1)
         return L_x, L_u, L_xx, L_xu, L_uu
