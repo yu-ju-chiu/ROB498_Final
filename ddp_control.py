@@ -184,24 +184,35 @@ class DDPController(object):
         f_x = torch.from_numpy(f_x).type(torch.float32)
         f_u = torch.from_numpy(f_u).type(torch.float32)
         f = self.env.dynamics
+
         eps = 1e-3
-        f_xx = torch.zeros(6,6)
-        f_xu = torch.zeros(6,1)
+        f_xx = torch.zeros(6,6,6)
+        idx = torch.eye(6)
+        for i in range(6):
+            for j in range(6):
+                f1 = f(state+eps*idx[i]+eps*idx[j], action)
+                f2 = f(state+eps*idx[i]-eps*idx[j], action)
+                f3 = f(state-eps*idx[i]+eps*idx[j], action)
+                f4 = f(state-eps*idx[i]-eps*idx[j], action)
+                f_xx[i, j] = torch.from_numpy(f1-f2-f3+f4) /4 /eps /eps
+        
+        f_xu = torch.zeros(6,6)
+        for i in range(6):
+            f1 = f(state+eps*idx[i], action+eps)
+            f2 = f(state+eps*idx[i], action-eps)
+            f3 = f(state-eps*idx[i], action+eps)
+            f4 = f(state-eps*idx[i], action-eps)
+            f_xu[i] = torch.from_numpy(f1-f2-f3+f4) /4 /eps /eps
+
         f_uu = torch.zeros(6,1)
-        idx1 = torch.tensor([1, 0, 0, 0, 0, 0])
-        idx2 = torch.tensor([0, 1, 0, 0, 0, 0])
-        idx3 = torch.tensor([0, 0, 1, 0, 0, 0])
-        idx4 = torch.tensor([0, 0, 0, 1, 0, 0])
-        idx5 = torch.tensor([0, 0, 0, 0, 1, 0])
-        idx6 = torch.tensor([0, 0, 0, 0, 0, 1])
-        A1 = (f(state+eps*idx1, action)-f(state-eps*idx1, action)) /2 /eps
-        A2 = (f(state+eps*idx2, action)-f(state-eps*idx2, action)) /2 /eps
-        A3 = (f(state+eps*idx3, action)-f(state-eps*idx3, action)) /2 /eps
-        A4 = (f(state+eps*idx4, action)-f(state-eps*idx4, action)) /2 /eps
-        A5 = (f(state+eps*idx5, action)-f(state-eps*idx5, action)) /2 /eps
-        A6 = (f(state+eps*idx6, action)-f(state-eps*idx6, action)) /2 /eps
-        L_u = (f(state, action+eps)-f(state, action-eps)) /2 /eps
-        L_x = torch.vstack((A1, A2, A3, A4, A5, A6))
+        idx = torch.eye(6)
+        f1 = -f(state, action+2*eps)
+        f2 = 16*f(state, action+eps)
+        f3 = -30*f(state, action)
+        f4 = 16*f(state, action-eps)
+        f5 = -f(state, action-2*eps)
+        f_uu[:, 0] = torch.from_numpy(f1+f2+f3+f4+f5)/12/eps/eps
+        
         return f_x, f_u, f_xx, f_xu, f_uu
 
 
