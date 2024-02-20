@@ -15,7 +15,7 @@ class DDPController(object):
         self.goal_state = torch.zeros(self.state_size)  # This is just a container for later use
         # self.Q = torch.diag(torch.tensor([20.0, 0.5, 5.0, 1.0, 1.0, 1.0]))
         self.Q = torch.diag(10*torch.tensor([5.0, 5.0, 5.0, 0.1, 0.1, 0.1]))
-        self.R = torch.diag(torch.tensor([0.01]))
+        self.R = torch.diag(torch.tensor([0.1]))
         self.U = torch.zeros((self.T, self.action_size)) # nominal action sequence (T, action_size)
         self.u_init = torch.zeros(self.action_size)
         self.X = torch.zeros((self.T, self.state_size))
@@ -38,7 +38,7 @@ class DDPController(object):
         initial_cost =  self._compute_trajectory_cost(self.X, self.U)
         # print("initial", initial_cost)
         eps=1
-        if initial_cost.item() is 0:
+        if initial_cost.item() == 0:
             x, u = self._foward_pass(state, eps)
         else:
             x, u = self._foward_pass(state, eps)
@@ -90,10 +90,14 @@ class DDPController(object):
         V_0 = torch.zeros(self.T+1)
         V_x = torch.zeros((self.state_size, self.T+1))
         V_xx = torch.zeros((self.state_size, self.state_size, self.T+1))
+        phi_x, phi_xx = self.find_terminal_gredient(self.X[-1])
+        V_0[-1] = self._compute_terminal_cost(self.X[-1])
+        V_x[:, -1] = phi_x
+        V_xx[:, :,-1] = phi_xx
 
         for i in reversed(range(self.T-1)):
-            mu_1 = 0.1
-            mu_2 = 0.1
+            mu_1 = 0.0
+            mu_2 = 0.0
             f_x, f_u, f_xx, f_ux, f_uu = self.find_f_gredient(self.X[i], self.U[i])
             L_x, L_u, L_xx, L_xu, L_uu = self.find_cost_gredient(self.X[i], self.U[i])
             # print(L_x.shape, f_x.T.shape, V_x[:, i+1:i+2].shape)
@@ -102,6 +106,7 @@ class DDPController(object):
             Q_u = L_u + f_u.T @ V_x[:, i+1:i+2]
             # print(L_xx.shape, f_x.T.shape, V_xx[:, :, i+1].shape, V_x[:, i+1:i+2].shape, f_xx.shape)
             Q_xx = L_xx + f_x.T @ V_xx[:, :, i+1] @ f_x + (V_x[:, i+1:i+2].T @ f_xx).squeeze()
+            # print((f_xx @ V_x[:, i+1:i+2]).shape)
             # print(L_xu.shape, f_u.T.shape, V_xx[:, :, i+1].shape, V_x[:, i+1:i+2].shape, f_ux.shape)
             Q_ux = L_xu.T + f_u.T @ V_xx[:, :, i+1] @ f_x + V_x[:, i+1:i+2].T @ f_ux
             # print(L_uu.shape, f_u.T.shape, V_xx[:, :, i+1].shape, V_x[:, i+1:i+2].shape, f_uu.shape)
@@ -126,10 +131,10 @@ class DDPController(object):
             # Q_uu = L_uu + f_u.T @ (V_xx[:, :, i+1] + mu_1 * torch.eye(6)) @ f_u + mu_2 * torch.eye(1)
             # inv_Q_uu = torch.linalg.inv(Q_uu)
             # print(inv_Q_uu, Q_u, Q_ux, L_uu)
-            # lower_b, upper_b= -10-self.U, 5-self.U
+            # lower_b, upper_b= -10-self.U, 10-self.U
             # num = 50
             # min_tar = 100000
-            # argmin_du = 0
+            # argmin_du = -inv_Q_uu @ Q_u
             # for j in range(num):
             #     du = lower_b[i] + (upper_b[i]-lower_b[i])*j/num
             #     tar = du @ Q_uu @ du /2 + torch.mean(Q_x @ du)
@@ -138,7 +143,7 @@ class DDPController(object):
             self.k[i] = -inv_Q_uu @ Q_u
             self.K[i] = -inv_Q_uu @ Q_ux
 
-            V_0[i] = V_0[i+1] - Q_u.T @ inv_Q_uu @ Q_u /2 # +L_0
+            V_0[i] = V_0[i+1] - Q_u.T @ inv_Q_uu @ Q_u /2 + self._compute_cost(self.X[i], self.U[i])
             # print(V_x[:, i].shape, Q_x.shape, Q_ux.T.shape, inv_Q_uu.shape, Q_u.shape)
             V_x[:, i] = (Q_x - Q_ux.T @ inv_Q_uu @ Q_u).squeeze()
             V_xx[:, :, i] = Q_xx - Q_ux.T @ inv_Q_uu @ Q_ux
@@ -195,6 +200,14 @@ class DDPController(object):
         control_costs = actions**2 * R
         total_cost = state_costs + control_costs
         return total_cost
+    
+    def _compute_terminal_cost(self, state):
+        Q = self.Q * 2
+        state_errors = state - self.goal_state
+        state_costs = 0
+        for i in range(Q.shape[0]):
+            state_costs += state_errors[i]**2 * Q[i,i]
+        return state_costs
 
     def _compute_trajectory_cost(self, trajectory_states, trajectory_acrions):
         """
@@ -245,6 +258,9 @@ class DDPController(object):
 
         eps = 1e-3
         f_xx = torch.zeros(6,6,6)
+        f_xu = torch.zeros(6,6)
+        f_uu = torch.zeros(6,1)
+
         # idx = torch.eye(6)
         # for i in range(6):
         #     for j in range(6):
@@ -254,7 +270,6 @@ class DDPController(object):
         #         f4 = f(state-eps*idx[i]-eps*idx[j], action)
         #         f_xx[i, j] = torch.from_numpy(f1-f2-f3+f4) /4 /eps /eps
         
-        f_xu = torch.zeros(6,6)
         # for i in range(6):
         #     f1 = f(state+eps*idx[i], action+eps)
         #     f2 = f(state+eps*idx[i], action-eps)
@@ -262,14 +277,11 @@ class DDPController(object):
         #     f4 = f(state-eps*idx[i], action-eps)
         #     f_xu[i] = torch.from_numpy(f1-f2-f3+f4) /4 /eps /eps
 
-        f_uu = torch.zeros(6,1)
-        # idx = torch.eye(6)
-        # f1 = -f(state, action+2*eps)
-        # f2 = 16*f(state, action+eps)
-        # f3 = -30*f(state, action)
-        # f4 = 16*f(state, action-eps)
-        # f5 = -f(state, action-2*eps)
-        # f_uu[:, 0] = torch.from_numpy(f1+f2+f3+f4+f5)/12/eps/eps
+        # f1 = f(state, action+eps+eps)
+        # f2 = f(state, action+eps-eps)
+        # f3 = f(state, action-eps+eps)
+        # f4 = f(state, action-eps-eps)
+        # f_uu[:, 0] = torch.from_numpy(f1-f2-f3+f4) /4 /eps /eps
         
         return f_x, f_u, f_xx, f_xu, f_uu
 
@@ -353,3 +365,11 @@ class DDPController(object):
         L_xu = H[0][1]
         L_uu = H[1][1]
         return L_x, L_u, L_xx, L_xu, L_uu
+    
+    def find_terminal_gredient(self, state):
+        f = self._compute_terminal_cost
+        J = torch.autograd.functional.jacobian(f, state)
+        phi_x = J
+        H = torch.autograd.functional.hessian(f, state)
+        phi_xx = H
+        return phi_x, phi_xx

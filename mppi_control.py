@@ -18,8 +18,8 @@ def get_cartpole_mppi_hyperparams():
         'noise_sigma': None,
     }
     hyperparams['lambda'] = 0.1
-    hyperparams['Q'] = torch.diag(torch.tensor([5.0, 5.0, 5.0, 0.1, 0.1, 0.1]))
-    hyperparams['noise_sigma'] = torch.tensor([[15.0]])
+    hyperparams['Q'] = 10*torch.diag(torch.tensor([5.0, 5.0, 5.0, 0.1, 0.05, 0.05]))
+    hyperparams['noise_sigma'] = torch.tensor([[10.0]])
     return hyperparams
 
 class MPPIController(object):

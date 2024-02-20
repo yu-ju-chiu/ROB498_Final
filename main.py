@@ -10,6 +10,7 @@ from cartpole_env import *
 from dynamics import *
 from mppi_control import *
 from ddp_control import *
+from make_plot import *
 
 def main():
     env = CartpoleEnv()
@@ -111,40 +112,15 @@ def main():
     # plt.show()
 
     # MPPI
-    # env = CartpoleEnv()
-    # env.reset(np.array([0, np.pi, 0, 0, 0, 0]) + np.random.rand(6,)) 
-    # goal_state = np.zeros(6)
-    # controller = MPPIController(env, num_samples=500, horizon=30, hyperparams=get_cartpole_mppi_hyperparams())
-    # controller.goal_state = torch.tensor(goal_state, dtype=torch.float32)
-    # frames = []
-    # num_steps = 70
-    # pbar = tqdm(range(num_steps))
-    # for i in pbar:
-    #     state = env.get_state()
-    #     state = torch.tensor(state, dtype=torch.float32)
-    #     control = controller.command(state)
-    #     s = env.step(control) 
-    #     error_i = np.linalg.norm(s-goal_state[:7])
-    #     pbar.set_description(f'Goal Error: {error_i:.4f}')
-    #     img = env.render()
-    #     frames.append(img)
-    #     if error_i < .1:
-    #         break
-    # print("creating animated gif, please wait about 10 seconds")
-    # write_apng("cartpole_mppi.gif", frames, delay=10)
-    # Image(filename="cartpole_mppi.gif")
-
-    # DDP
-    # Define problem parameters
     env = CartpoleEnv()
-    start_state = np.array([0, np.pi, 0, 0, 0, 0]) # + np.random.rand(6,) 
-    env.reset(start_state)
+    start_state = np.array([0, np.pi, 0, 0, 0, 0]) + np.random.rand(6,)
+    env.reset(start_state) 
     goal_state = np.zeros(6)
-    controller = DDPController(env, horizon=30)
+    controller = MPPIController(env, num_samples=500, horizon=30, hyperparams=get_cartpole_mppi_hyperparams())
     controller.goal_state = torch.tensor(goal_state, dtype=torch.float32)
-    controller.reset(torch.tensor(start_state, dtype=torch.float32))
     frames = []
     num_steps = 100
+    state1, state2, state3, state4, state5, state6, costs = [], [], [], [], [], [], []
     pbar = tqdm(range(num_steps))
     for i in pbar:
         state = env.get_state()
@@ -153,15 +129,79 @@ def main():
         s = env.step(control) 
         error_i = np.linalg.norm(s-goal_state[:7])
         pbar.set_description(f'Goal Error: {error_i:.4f}')
-        pbar.update()
         img = env.render()
         frames.append(img)
+        state1.append(state[0].item())
+        state2.append(state[1].item())
+        state3.append(state[2].item())
+        state4.append(state[3].item())
+        state5.append(state[4].item())
+        state6.append(state[5].item())
+        costs.append(controller._compute_trajectory_cost(state[None, None, :], torch.zeros(1, 1, 1))[0].item())
         if error_i < .1:
             break
-    
     print("creating animated gif, please wait about 10 seconds")
-    write_apng("cartpole_ddp.gif", frames, delay=10)
-    Image(filename="cartpole_ddp.gif")
+    write_apng("cartpole_mppi.gif", frames, delay=10)
+    Image(filename="cartpole_mppi.gif")
+    
+    state_plot(state1, state2, state3, state4, state5, state6)
+    cost_plot(costs)
+
+    # # DDP
+    # # Define problem parameters
+    # env = CartpoleEnv()
+    # start_state = np.array([0, np.pi, 0, 0, 0, 0]) + np.random.rand(6,)
+    # # print(np.random.rand(6,)) 
+    # env.reset(start_state)
+    # goal_state = np.zeros(6)
+    # controller = DDPController(env, horizon=30)
+    # controller.goal_state = torch.tensor(goal_state, dtype=torch.float32)
+    # controller.reset(torch.tensor(start_state, dtype=torch.float32))
+    # frames = []
+    # num_steps = 100
+    # state1, state2, state3, state4, state5, state6, costs = [], [], [], [], [], [], []
+    # k, K1, K2, K3, K4, K5, K6 = [], [], [], [], [], [], []
+    # pbar = tqdm(range(num_steps))
+    # for i in pbar:
+    #     state = env.get_state()
+    #     state = torch.tensor(state, dtype=torch.float32)
+    #     control = controller.command(state)
+    #     s = env.step(control) 
+    #     error_i = np.linalg.norm(s-goal_state[:7])
+    #     pbar.set_description(f'Goal Error: {error_i:.4f}')
+    #     pbar.update()
+    #     # img = env.render()
+    #     # frames.append(img)
+    #     state1.append(state[0].item())
+    #     state2.append(state[1].item())
+    #     state3.append(state[2].item())
+    #     state4.append(state[3].item())
+    #     state5.append(state[4].item())
+    #     state6.append(state[5].item())
+    #     costs.append(controller._compute_cost(state, torch.zeros(1))[0].item())
+    #     k.append(controller.k[0].item())
+    #     K_t = torch.mean(controller.K, dim=0)
+    #     K1.append(K_t[0,0].item())
+    #     K2.append(K_t[0,1].item())
+    #     K3.append(K_t[0,2].item())
+    #     K4.append(K_t[0,3].item())
+    #     K5.append(K_t[0,4].item())
+    #     K6.append(K_t[0,5].item())
+    #     # K1.append(controller.K[0,0,0].item())
+    #     # K2.append(controller.K[0,0,1].item())
+    #     # K3.append(controller.K[0,0,2].item())
+    #     # K4.append(controller.K[0,0,3].item())
+    #     # K5.append(controller.K[0,0,4].item())
+    #     # K6.append(controller.K[0,0,5].item())
+    #     if error_i < .001:
+    #         break
+    # state_plot(state1, state2, state3, state4, state5, state6)
+    # cost_plot(costs)
+    # gain_plot(k, K1, K2, K3, K4, K5, K6)
+    
+    # print("creating animated gif, please wait about 10 seconds")
+    # write_apng("cartpole_ddp.gif", frames, delay=10)
+    # Image(filename="cartpole_ddp.gif")
 
 
 if __name__ == '__main__':
