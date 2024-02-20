@@ -13,7 +13,7 @@ potentially highly nonlinear formulations. The results show
 that both methods were able to successfully control a double
 pendulum to the desired position.
 
-[project report](Project_Report_DDP.pdf)
+[project report](pic/Project_Report_DDP.pdf)
 
 ## Demo
 You can run the following command to run the demo of our code. The result will be stored as a gif file.
