@@ -1,5 +1,4 @@
-*.png
+/old_pic
 test.py
 install.py
-*.gif
 /__pycache__

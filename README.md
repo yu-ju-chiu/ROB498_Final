@@ -13,7 +13,12 @@ potentially highly nonlinear formulations. The results show
 that both methods were able to successfully control a double
 pendulum to the desired position.
 
-## Dynamics Model
-![image](pic/dynamics.png "simple demo")
-
 ## Demo
+You can run the following command to run the demo of our code. The result will be stored as a gif file.
+```
+python demo.py
+```
+![image](pic/cartpole_ddp.gif "simple demo")
+
+## Dynamics Model
+![image](pic/dynamics.png "dynamics model")

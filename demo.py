@@ -40,7 +40,7 @@ def main():
     write_apng("cartpole_ddp.gif", frames, delay=10)
     Image(filename="cartpole_ddp.gif")
 
-    if 1: # you can turn on mppi here
+    if 0: # you can turn on mppi here
         # MPPI
         env = CartpoleEnv()
         env.reset(start_state) 
